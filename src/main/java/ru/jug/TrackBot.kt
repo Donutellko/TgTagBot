@@ -60,9 +60,9 @@ class TrackBot(
             .privacy(PUBLIC)
             .action { ctx ->
                 run {
-                    val id = ctx.update().message.replyToMessage.from.id
+                    val user = ctx.update().message.replyToMessage.from ?: ctx.user()
                     silent.send(
-                            "Теги:" + (tags[id ?: ctx.user()] ?: "<нет>"),
+                            "Теги: " + (tags[user] ?: "<нет>"),
                             ctx.chatId()!!)
                 }
             }
@@ -101,4 +101,6 @@ class TrackBot(
                     }
                 }
             }.build()
+
+    class UserTag(val user: User, var tags: String)
 }
