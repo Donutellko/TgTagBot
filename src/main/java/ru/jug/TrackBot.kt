@@ -3,10 +3,12 @@ package ru.jug
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.telegram.abilitybots.api.bot.AbilityBot
-import org.telegram.abilitybots.api.bot.BaseAbilityBot
 import org.telegram.abilitybots.api.objects.Ability
 import org.telegram.abilitybots.api.objects.Locality.ALL
 import org.telegram.abilitybots.api.objects.Privacy.PUBLIC
+import org.telegram.telegrambots.meta.api.methods.ParseMode
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage
+import org.telegram.telegrambots.meta.api.objects.User
 import java.util.*
 
 @Service
@@ -16,22 +18,10 @@ class TrackBot(
         //        , DefaultBotOptions botOptions
 ) : AbilityBot(botToken, botUsername) {
 
-    internal var tags: MutableMap<Int, Array<String>> = HashMap()
+    private var tags: MutableMap<User, String> = HashMap()
 
     override fun creatorId(): Int {
         return 315210300
-    }
-
-    fun sayHelloWorld(): Ability {
-        return Ability
-                .builder()
-                .name(BaseAbilityBot.DEFAULT)
-                .info("says hello world!")
-                .locality(ALL)
-                .privacy(PUBLIC)
-                .action { ctx -> silent.send("Hello world!", ctx.chatId()!!) }
-                .post { ctx -> silent.send("Anything else!", ctx.chatId()!!) }
-                .build()
     }
 
     /**
@@ -44,14 +34,21 @@ class TrackBot(
                 .locality(ALL)
                 .privacy(PUBLIC)
                 .action { ctx ->
-                    tags[ctx.user().id] = ctx.arguments()
-                    silent.send(
-                            "Вам добавлены теги " +
-                                    ctx.arguments().joinToString("', '", "'", "'"),
-                            ctx.user().id!!.toLong())
+                    if (ctx.firstArg().isNullOrBlank()) {
+                        silent.send("Пустой список тегов.", ctx.user().id!!.toLong())
+                    } else {
+                        val user = ctx.update().message.replyToMessage?.from ?: ctx.user()
+                        tags[user] = ctx.update().message.text.replace("/reg ", "")
+
+                        silent.send(
+                                "Добавлены теги пользователю ${user.userName ?: user.firstName}",
+                                ctx.chatId())
+                    }
                 }
                 .build()
     }
+
+    private fun tagsList(user: User) = tags[user]?.split(" ")
 
     /**
      * Get info for user with
@@ -65,8 +62,7 @@ class TrackBot(
                 run {
                     val id = ctx.update().message.replyToMessage.from.id
                     silent.send(
-                            tags[id]?.joinToString("', '", "Теги: ''", "'")
-                                    ?: "Нет тегов",
+                            "Теги:" + (tags[id ?: ctx.user()] ?: "<нет>"),
                             ctx.chatId()!!)
                 }
             }
@@ -83,17 +79,26 @@ class TrackBot(
             .action { ctx ->
                 run {
                     val a = ctx.firstArg()
-                    val text = ctx.update().message.text
-                    val filterRole = a.filter { it.isLetter() }
-                    val filterTrack = a.filter { it.isDigit() }
+                    val filters = ctx.firstArg().split("\n")[0]
+                    val filterRole = filters.filter { it.isLetter() }
+                    val filterTrack = filters.filter { it.isDigit() }
 
                     val filtered = tags.filterKeys { id ->
-                        tags[id]!!.any {
-                            (filterRole.isBlank() || it.contains(filterRole))
-                                    && (filterTrack.isBlank() || it.contains(filterTrack))
-                        }
+                        val utags = tags[id]!!
+                        (filterRole.isBlank() || utags.contains(filterRole))
+                                && (filterTrack.isBlank() || utags.contains(filterTrack))
                     }
-                    silent.send(filtered.keys.joinToString(", tg://user?id=", "tg://user?id="), ctx.chatId()!!)
+
+                    if (filtered.isNotEmpty()) {
+                        silent.execute(SendMessage().apply {
+                            setChatId(ctx.chatId())
+                            setParseMode(ParseMode.MARKDOWN)
+                            replyToMessageId = ctx.update().message.messageId
+                            text = filtered.keys.joinToString(", ") {
+                                "[${it.userName ?: it.firstName}](tg://user?id=${it.id})"
+                            }
+                        })
+                    }
                 }
             }.build()
 }
